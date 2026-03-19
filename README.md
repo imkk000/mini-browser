@@ -27,3 +27,7 @@ I want to bunch my many applications such as freshrss into single browser withou
   }
 ]
 ```
+
+## Preview
+
+<img src="./docs/preview.png" alt="Mini Browser Preview">
