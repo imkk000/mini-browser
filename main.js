@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 app.commandLine.appendSwitch("enable-features", "WebviewTag");
 const path = require("path");
 const fs = require("fs");
@@ -27,9 +27,32 @@ function loadApps() {
 // Respond to renderer asking for apps
 ipcMain.handle("get-apps", () => loadApps());
 
+ipcMain.handle("open-external", (_, url) => shell.openExternal(url));
+
+// Intercept all webview navigations at the main process level
+app.on("web-contents-created", (_, contents) => {
+  // Only apply to webviews, not the main window
+  if (contents.getType() !== "webview") return;
+
+  // Block external navigation and open in system browser
+  contents.on("will-navigate", (e, url) => {
+    const current = new URL(contents.getURL());
+    const next = new URL(url);
+    if (next.hostname !== current.hostname || next.port !== current.port) {
+      e.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  // Also handle target="_blank" links
+  contents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+});
+
 // Let renderer open config file in default editor
 ipcMain.handle("open-config", () => {
-  const { shell } = require("electron");
   shell.openPath(getConfigPath());
 });
 
