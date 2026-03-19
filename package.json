@@ -1,0 +1,51 @@
+{
+  "name": "mini-browser",
+  "version": "0.0.1",
+  "main": "main.js",
+  "author": {
+    "name": "kk",
+    "email": "kk@arch.linux"
+  },
+  "homepage": "http://example.com",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --linux",
+    "install": "sudo pacman -U dist/mini-browser-0.0.1.pacman"
+  },
+  "build": {
+    "appId": "com.mini.browser",
+    "productName": "Mini Browser",
+    "directories": {
+      "output": "dist"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "pacman"
+      ],
+      "category": "Network"
+    },
+    "pacman": {
+      "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libxss",
+        "libxtst",
+        "xdg-utils",
+        "at-spi2-core",
+        "util-linux-libs"
+      ]
+    },
+    "npmRebuild": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**"
+    ]
+  },
+  "devDependencies": {
+    "electron": "41.0.3",
+    "electron-builder": "26.8.1"
+  }
+}
