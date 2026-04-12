@@ -138,6 +138,62 @@
       background: #45475a;
       margin: 4px 0;
     }
+
+    #find-bar {
+      display: none;
+      position: fixed;
+      top: 48px;
+      right: 12px;
+      z-index: 2000;
+      background: #313244;
+      border: 1px solid #585b70;
+      border-radius: 8px;
+      padding: 6px 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #find-bar.visible {
+      display: flex;
+    }
+
+    #find-input {
+      background: #1e1e2e;
+      border: 1px solid #45475a;
+      border-radius: 4px;
+      color: #cdd6f4;
+      font-size: 13px;
+      padding: 4px 8px;
+      width: 200px;
+      outline: none;
+    }
+
+    #find-input:focus {
+      border-color: #cba6f7;
+    }
+
+    #find-count {
+      color: #6c7086;
+      font-size: 12px;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    .find-btn {
+      background: #45475a;
+      border: none;
+      border-radius: 4px;
+      color: #cdd6f4;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 4px 8px;
+    }
+
+    .find-btn:hover {
+      background: #585b70;
+    }
   </style>
 </head>
 
@@ -149,6 +205,14 @@
   </div>
   <div id="views">
     <div id="drag-shield"></div>
+  </div>
+
+  <div id="find-bar">
+    <input id="find-input" type="text" placeholder="Find in page…" />
+    <span id="find-count"></span>
+    <button class="find-btn" id="find-prev" title="Previous (Shift+Enter)">&#8593;</button>
+    <button class="find-btn" id="find-next" title="Next (Enter)">&#8595;</button>
+    <button class="find-btn" id="find-close" title="Close (Esc)">&#10005;</button>
   </div>
 
   <div id="tab-menu">
@@ -213,6 +277,73 @@
       if (!tabMenu.contains(e.target)) hideTabMenu();
     });
 
+    // ── Find in page ────────────────────────────────────────────────────────
+    const findBar = document.getElementById("find-bar");
+    const findInput = document.getElementById("find-input");
+    const findCount = document.getElementById("find-count");
+    let activeSearchText = "";
+
+    function getActiveWebviews() {
+      const activeIdx = [...document.querySelectorAll(".tab")].findIndex((t) =>
+        t.classList.contains("active")
+      );
+      return activeIdx >= 0 ? (allTabWebviews[activeIdx] || []) : [];
+    }
+
+    function openFindBar() {
+      findBar.classList.add("visible");
+      findInput.focus();
+      findInput.select();
+    }
+
+    function closeFindBar() {
+      findBar.classList.remove("visible");
+      findCount.textContent = "";
+      activeSearchText = "";
+      getActiveWebviews().forEach((wv) => {
+        window.electronAPI.webviewStopFind(wv.getWebContentsId());
+      });
+    }
+
+    // forward=true/false for direction; findNext=true to navigate within existing results
+    function doFind(forward = true, findNext = false) {
+      const text = findInput.value;
+      if (!text) {
+        findCount.textContent = "";
+        getActiveWebviews().forEach((wv) =>
+          window.electronAPI.webviewStopFind(wv.getWebContentsId())
+        );
+        activeSearchText = "";
+        return;
+      }
+      getActiveWebviews().forEach((wv) => {
+        window.electronAPI.webviewFind(wv.getWebContentsId(), text, { forward, findNext });
+      });
+      activeSearchText = text;
+    }
+
+    // Track found-in-page results from main process
+    window.electronAPI.onFoundInPage((wcId, result) => {
+      if (!result.finalUpdate) return;
+      const firstWv = getActiveWebviews()[0];
+      if (!firstWv || firstWv.getWebContentsId() !== wcId) return;
+      findCount.textContent = result.matches > 0
+        ? `${result.activeMatchOrdinal}/${result.matches}`
+        : "No results";
+    });
+
+    // New search on every keystroke
+    findInput.addEventListener("input", () => doFind(true, false));
+
+    findInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); doFind(!e.shiftKey, true); }
+      if (e.key === "Escape") { e.preventDefault(); closeFindBar(); }
+    });
+
+    document.getElementById("find-prev").addEventListener("click", () => doFind(false, true));
+    document.getElementById("find-next").addEventListener("click", () => doFind(true, true));
+    document.getElementById("find-close").addEventListener("click", closeFindBar);
+
     document.addEventListener("keydown", (e) => {
       if (e.key === "F12") {
         const activeIdx = [...document.querySelectorAll(".tab")].findIndex((t) =>
@@ -221,6 +352,8 @@
         if (activeIdx >= 0) allTabWebviews[activeIdx]?.forEach((wv) => wv.openDevTools());
       }
     });
+
+    window.electronAPI.onOpenFind(() => openFindBar());
 
     function switchTo(index) {
       document

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, webContents } = require("electron");
 app.commandLine.appendSwitch("enable-features", "WebviewTag");
 const path = require("path");
 const fs = require("fs");
@@ -49,6 +49,21 @@ app.on("web-contents-created", (_, contents) => {
   // Only apply to webviews, not the main window
   if (contents.getType() !== "webview") return;
 
+  // Intercept Ctrl+F so the webview doesn't swallow it
+  contents.on("before-input-event", (e, input) => {
+    if ((input.control || input.meta) && input.key.toLowerCase() === "f" && input.type === "keyDown") {
+      e.preventDefault();
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) win.webContents.send("open-find-bar");
+    }
+  });
+
+  // Forward found-in-page results back to the renderer
+  contents.on("found-in-page", (_, result) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) win.webContents.send("found-in-page-result", contents.id, result);
+  });
+
   // Block external navigation and open in system browser
   contents.on("will-navigate", (e, url) => {
     try {
@@ -68,6 +83,23 @@ app.on("web-contents-created", (_, contents) => {
     if (isSafeUrl(url)) shell.openExternal(url);
     return { action: "deny" };
   });
+});
+
+// Find in page via main process (reliable for webviews)
+ipcMain.handle("webview-find", (_, wcId, text, options) => {
+  if (typeof text !== "string" || !text) return;
+  const wc = webContents.fromId(wcId);
+  if (!wc || wc.isDestroyed() || wc.getType() !== "webview") return;
+  wc.findInPage(text, {
+    forward: options?.forward !== false,
+    findNext: options?.findNext === true,
+  });
+});
+
+ipcMain.handle("webview-stop-find", (_, wcId) => {
+  const wc = webContents.fromId(wcId);
+  if (!wc || wc.isDestroyed() || wc.getType() !== "webview") return;
+  wc.stopFindInPage("clearSelection");
 });
 
 // Let renderer open config file in default editor
@@ -94,6 +126,7 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
+
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
