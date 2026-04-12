@@ -107,6 +107,37 @@
     .pane-divider.dragging {
       background: #cba6f7;
     }
+
+    #tab-menu {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      padding: 4px 0;
+      min-width: 170px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+
+    .tab-menu-item {
+      padding: 8px 16px;
+      color: #cdd6f4;
+      cursor: pointer;
+      font-size: 13px;
+      user-select: none;
+    }
+
+    .tab-menu-item:hover {
+      background: #45475a;
+      color: #cba6f7;
+    }
+
+    .tab-menu-sep {
+      height: 1px;
+      background: #45475a;
+      margin: 4px 0;
+    }
   </style>
 </head>
 
@@ -120,13 +151,75 @@
     <div id="drag-shield"></div>
   </div>
 
+  <div id="tab-menu">
+    <div class="tab-menu-item" id="menu-refresh">↻  Refresh</div>
+    <div class="tab-menu-sep"></div>
+    <div id="menu-inspect-items"></div>
+  </div>
+
   <script>
     const tabBar = document.getElementById("tab-bar");
     const views = document.getElementById("views");
     const dragShield = document.getElementById("drag-shield");
+    const tabMenu = document.getElementById("tab-menu");
+    const menuInspectItems = document.getElementById("menu-inspect-items");
+    const allTabWebviews = [];
+    let menuWebviews = [];
 
     document.getElementById("edit-config").addEventListener("click", () => {
       window.electronAPI.openConfig();
+    });
+
+    function showTabMenu(e, webviews) {
+      e.preventDefault();
+      menuWebviews = webviews;
+
+      menuInspectItems.innerHTML = "";
+      if (webviews.length === 1) {
+        const item = document.createElement("div");
+        item.className = "tab-menu-item";
+        item.textContent = "⬡  Inspect";
+        item.addEventListener("click", () => { webviews[0].openDevTools(); hideTabMenu(); });
+        menuInspectItems.appendChild(item);
+      } else {
+        webviews.forEach((wv, i) => {
+          const item = document.createElement("div");
+          item.className = "tab-menu-item";
+          item.textContent = `⬡  Inspect Pane ${i + 1}`;
+          item.addEventListener("click", () => { wv.openDevTools(); hideTabMenu(); });
+          menuInspectItems.appendChild(item);
+        });
+      }
+
+      tabMenu.style.left = e.clientX + "px";
+      tabMenu.style.top = e.clientY + "px";
+      tabMenu.style.display = "block";
+      const x = Math.min(e.clientX, window.innerWidth - tabMenu.offsetWidth - 4);
+      const y = Math.min(e.clientY, window.innerHeight - tabMenu.offsetHeight - 4);
+      tabMenu.style.left = x + "px";
+      tabMenu.style.top = y + "px";
+    }
+
+    function hideTabMenu() {
+      tabMenu.style.display = "none";
+    }
+
+    document.getElementById("menu-refresh").addEventListener("click", () => {
+      menuWebviews.forEach((wv) => wv.reload());
+      hideTabMenu();
+    });
+
+    document.addEventListener("mousedown", (e) => {
+      if (!tabMenu.contains(e.target)) hideTabMenu();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "F12") {
+        const activeIdx = [...document.querySelectorAll(".tab")].findIndex((t) =>
+          t.classList.contains("active")
+        );
+        if (activeIdx >= 0) allTabWebviews[activeIdx]?.forEach((wv) => wv.openDevTools());
+      }
     });
 
     function switchTo(index) {
@@ -138,7 +231,7 @@
         .forEach((p, i) => p.classList.toggle("active", i === index));
     }
 
-    function makeDividerResizable(divider, leftWv, rightWv) {
+    function makeDividerResizable(divider, leftWv, rightWv, panel, webviews) {
       divider.addEventListener("mousedown", (e) => {
         e.preventDefault();
         divider.classList.add("dragging");
@@ -161,10 +254,25 @@
           dragShield.style.display = "none";
           document.removeEventListener("mousemove", onMove);
           document.removeEventListener("mouseup", onUp);
+          // Save ratios after drag ends
+          savePaneRatios(panel, webviews);
         }
 
         document.addEventListener("mousemove", onMove);
         document.addEventListener("mouseup", onUp);
+      });
+    }
+
+    function savePaneRatios(panel, webviews) {
+      const totalWidth = webviews.reduce((sum, wv) => sum + wv.offsetWidth, 0);
+      if (totalWidth === 0) return;
+      panel._paneRatios = webviews.map((wv) => wv.offsetWidth / totalWidth);
+    }
+
+    function applyPaneRatios(panel, webviews) {
+      if (!panel._paneRatios) return;
+      panel._paneRatios.forEach((ratio, i) => {
+        webviews[i].style.flex = `${ratio} ${ratio} 0`;
       });
     }
 
@@ -178,6 +286,7 @@
         btn.className = "tab" + (i === 0 ? " active" : "");
         btn.textContent = tab.label;
         btn.addEventListener("click", () => switchTo(i));
+        btn.addEventListener("contextmenu", (e) => showTabMenu(e, webviews));
         tabBar.insertBefore(btn, document.getElementById("edit-config"));
 
         const panel = document.createElement("div");
@@ -201,8 +310,15 @@
         });
 
         dividers.forEach((divider, j) => {
-          makeDividerResizable(divider, webviews[j], webviews[j + 1]);
+          makeDividerResizable(divider, webviews[j], webviews[j + 1], panel, webviews);
         });
+
+        allTabWebviews.push(webviews);
+
+        if (webviews.length > 1) {
+          const ro = new ResizeObserver(() => applyPaneRatios(panel, webviews));
+          ro.observe(panel);
+        }
 
         views.appendChild(panel);
       });

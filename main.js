@@ -44,7 +44,20 @@ ipcMain.handle("get-apps", () => {
   return apps;
 });
 
-ipcMain.handle("open-external", (_, url) => shell.openExternal(url));
+const SAFE_PROTOCOLS = new Set(["https:", "http:"]);
+
+function isSafeUrl(url) {
+  try {
+    return SAFE_PROTOCOLS.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle("open-external", (_, url) => {
+  if (!isSafeUrl(url)) return;
+  shell.openExternal(url);
+});
 
 // Intercept all webview navigations at the main process level
 app.on("web-contents-created", (_, contents) => {
@@ -53,17 +66,21 @@ app.on("web-contents-created", (_, contents) => {
 
   // Block external navigation and open in system browser
   contents.on("will-navigate", (e, url) => {
-    const current = new URL(contents.getURL());
-    const next = new URL(url);
-    if (next.hostname !== current.hostname || next.port !== current.port) {
+    try {
+      const current = new URL(contents.getURL());
+      const next = new URL(url);
+      if (next.hostname !== current.hostname || next.port !== current.port) {
+        e.preventDefault();
+        if (isSafeUrl(url)) shell.openExternal(url);
+      }
+    } catch {
       e.preventDefault();
-      shell.openExternal(url);
     }
   });
 
   // Also handle target="_blank" links
   contents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeUrl(url)) shell.openExternal(url);
     return { action: "deny" };
   });
 });
