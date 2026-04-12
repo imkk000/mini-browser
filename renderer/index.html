@@ -69,16 +69,43 @@
       position: relative;
     }
 
-    webview {
+    /* Covers webviews during drag so they don't steal mouse events */
+    #drag-shield {
+      display: none;
       position: absolute;
       inset: 0;
-      width: 100%;
-      height: 100%;
-      display: none;
+      z-index: 10;
+      cursor: col-resize;
     }
 
-    webview.active {
+    .tab-panel {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: row;
+    }
+
+    .tab-panel.active {
       display: flex;
+    }
+
+    .tab-panel webview {
+      flex: 1 1 0;
+      height: 100%;
+      min-width: 80px;
+    }
+
+    .pane-divider {
+      width: 4px;
+      background: #313244;
+      flex-shrink: 0;
+      cursor: col-resize;
+      transition: background 0.15s;
+    }
+
+    .pane-divider:hover,
+    .pane-divider.dragging {
+      background: #cba6f7;
     }
   </style>
 </head>
@@ -89,11 +116,14 @@
       ⚙ Edit Config
     </button>
   </div>
-  <div id="views"></div>
+  <div id="views">
+    <div id="drag-shield"></div>
+  </div>
 
   <script>
     const tabBar = document.getElementById("tab-bar");
     const views = document.getElementById("views");
+    const dragShield = document.getElementById("drag-shield");
 
     document.getElementById("edit-config").addEventListener("click", () => {
       window.electronAPI.openConfig();
@@ -104,24 +134,77 @@
         .querySelectorAll(".tab")
         .forEach((t, i) => t.classList.toggle("active", i === index));
       document
-        .querySelectorAll("webview")
-        .forEach((v, i) => v.classList.toggle("active", i === index));
+        .querySelectorAll(".tab-panel")
+        .forEach((p, i) => p.classList.toggle("active", i === index));
     }
 
-    window.electronAPI.getApps().then((apps) => {
-      apps.forEach((app, i) => {
+    function makeDividerResizable(divider, leftWv, rightWv) {
+      divider.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        divider.classList.add("dragging");
+        dragShield.style.display = "block";
+
+        const startX = e.clientX;
+        const leftStart = leftWv.offsetWidth;
+        const rightStart = rightWv.offsetWidth;
+
+        function onMove(e) {
+          const delta = e.clientX - startX;
+          const newLeft = Math.max(80, leftStart + delta);
+          const newRight = Math.max(80, rightStart - delta);
+          leftWv.style.flex = `0 0 ${newLeft}px`;
+          rightWv.style.flex = `0 0 ${newRight}px`;
+        }
+
+        function onUp() {
+          divider.classList.remove("dragging");
+          dragShield.style.display = "none";
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+        }
+
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    }
+
+    // Config format: [{label, panes: [{url, partition}, ...]}]
+    // Single pane: panes with one entry, or shorthand panes: {url, partition}
+    window.electronAPI.getApps().then((tabs) => {
+      tabs.forEach((tab, i) => {
+        const panes = Array.isArray(tab.panes) ? tab.panes : [tab.panes];
+
         const btn = document.createElement("button");
         btn.className = "tab" + (i === 0 ? " active" : "");
-        btn.textContent = app.label;
+        btn.textContent = tab.label;
         btn.addEventListener("click", () => switchTo(i));
         tabBar.insertBefore(btn, document.getElementById("edit-config"));
 
-        const wv = document.createElement("webview");
-        wv.src = app.url;
-        wv.partition = app.partition;
-        wv.className = i === 0 ? "active" : "";
-        wv.setAttribute("allowpopups", "");
-        views.appendChild(wv);
+        const panel = document.createElement("div");
+        panel.className = "tab-panel" + (i === 0 ? " active" : "");
+
+        const webviews = [];
+        const dividers = [];
+        panes.forEach((pane, j) => {
+          if (j > 0) {
+            const divider = document.createElement("div");
+            divider.className = "pane-divider";
+            panel.appendChild(divider);
+            dividers.push(divider);
+          }
+          const wv = document.createElement("webview");
+          wv.src = pane.url;
+          if (pane.partition) wv.partition = pane.partition;
+          wv.setAttribute("allowpopups", "");
+          panel.appendChild(wv);
+          webviews.push(wv);
+        });
+
+        dividers.forEach((divider, j) => {
+          makeDividerResizable(divider, webviews[j], webviews[j + 1]);
+        });
+
+        views.appendChild(panel);
       });
     });
   </script>
