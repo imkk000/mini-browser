@@ -11,7 +11,6 @@ I want to bunch my many applications such as freshrss into single browser withou
 - Tabs with isolated persistent sessions (cookies, storage)
 - Split panes per tab — view multiple apps side by side
 - Drag-to-resize split panes
-- Custom DNS-over-HTTPS (DoH) server per pane
 - External links open in the system browser
 
 ## Config
@@ -42,19 +41,6 @@ Each entry is a tab with a `label` and one or more `panes`:
 |-------------|----------|--------------------------------------------------|
 | `url`       | yes      | Initial URL to load                              |
 | `partition` | yes      | Session name — use `persist:` prefix to persist across restarts |
-| `doh`       | no       | Custom DNS-over-HTTPS server URL for this pane   |
-
-### DoH example
-
-```json
-{
-  "url": "https://example.com",
-  "partition": "persist:example",
-  "doh": "https://cloudflare-dns.com/dns-query"
-}
-```
-
-Different panes can use different DoH servers. Requires Electron 22+.
 
 ## Preview
 

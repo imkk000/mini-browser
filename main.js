@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, session } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 app.commandLine.appendSwitch("enable-features", "WebviewTag");
 const path = require("path");
 const fs = require("fs");
@@ -24,24 +24,9 @@ function loadApps() {
   }
 }
 
-function applyDohConfig(apps) {
-  apps.forEach((tab) => {
-    const panes = Array.isArray(tab.panes) ? tab.panes : [tab.panes];
-    panes.forEach((pane) => {
-      if (!pane.doh || !pane.partition) return;
-      session.fromPartition(pane.partition).setDnsConfig({
-        secureDnsMode: "secure",
-        secureDnsServers: [pane.doh],
-      });
-    });
-  });
-}
-
 // Respond to renderer asking for apps
 ipcMain.handle("get-apps", () => {
-  const apps = loadApps();
-  applyDohConfig(apps);
-  return apps;
+  return loadApps();
 });
 
 const SAFE_PROTOCOLS = new Set(["https:", "http:"]);
