@@ -10,13 +10,21 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --linux",
-    "install": "sudo pacman -U dist/mini-browser-0.0.1.pacman"
+    "dist:mac": "electron-builder --mac --arm64",
+    "install": "sudo pacman -U dist/mini-browser-0.0.1.pacman",
+    "install:mac": "hdiutil attach \"dist/Mini Browser-0.0.1-arm64.dmg\" && cp -R \"/Volumes/Mini Browser/Mini Browser.app\" /Applications/ && hdiutil detach \"/Volumes/Mini Browser\""
   },
   "build": {
     "appId": "com.mini.browser",
     "productName": "Mini Browser",
     "directories": {
       "output": "dist"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] }
+      ],
+      "category": "public.app-category.utilities"
     },
     "linux": {
       "target": [

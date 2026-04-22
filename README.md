@@ -19,9 +19,30 @@ I want to bunch my many applications such as freshrss into single browser withou
 - Edit Config button opens `apps.json` in your default editor
 - External links open in the system browser
 
+## Build & Install
+
+### Linux (Arch)
+
+```bash
+npm run dist
+npm run install
+```
+
+### macOS (Apple Silicon)
+
+```bash
+npm run dist:mac
+npm run install:mac
+```
+
+> `install:mac` mounts the DMG, copies the app to `/Applications`, then ejects the volume.
+
 ## Config
 
-Config file location: `~/.config/mini-browser/apps.json` (Linux) or the Electron `userData` path on your platform.
+Config file location:
+
+- **Linux:** `~/.config/mini-browser/apps.json`
+- **macOS:** `~/Library/Application Support/Mini Browser/apps.json`
 
 Each entry is a tab with a `label` and one or more `panes`:
 
