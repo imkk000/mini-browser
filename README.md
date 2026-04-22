@@ -11,6 +11,11 @@ I want to bunch my many applications such as freshrss into single browser withou
 - Tabs with isolated persistent sessions (cookies, storage)
 - Split panes per tab — view multiple apps side by side
 - Drag-to-resize split panes
+- Collapse/expand individual panes via divider buttons
+- Find in page (`Ctrl+F` / `Cmd+F`) with match count and prev/next navigation
+- Right-click a tab for refresh and per-pane DevTools
+- `F12` opens DevTools for all panes in the active tab
+- Edit Config button opens `apps.json` in your default editor
 - External links open in the system browser
 
 ## Config

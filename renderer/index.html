@@ -93,19 +93,103 @@
       flex: 1 1 0;
       height: 100%;
       min-width: 80px;
+      transition: flex 0.2s ease;
     }
 
     .pane-divider {
-      width: 4px;
-      background: #313244;
+      width: 20px;
       flex-shrink: 0;
       cursor: col-resize;
+      position: relative;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .pane-divider::before {
+      content: "";
+      width: 4px;
+      height: 100%;
+      background: #313244;
       transition: background 0.15s;
     }
 
-    .pane-divider:hover,
-    .pane-divider.dragging {
+    .pane-divider:hover::before,
+    .pane-divider.dragging::before {
       background: #cba6f7;
+    }
+
+    .pane-divider.pane-collapsed-adj {
+      cursor: default;
+    }
+
+    .pane-divider.pane-collapsed-adj::before {
+      background: #1e1e2e;
+    }
+
+    .collapse-toggle-wrap {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      flex-direction: column;
+      z-index: 5;
+    }
+
+    .pane-divider:hover .collapse-toggle-wrap,
+    .collapse-toggle-wrap.has-collapsed {
+      display: flex;
+    }
+
+    .collapse-btn {
+      width: 18px;
+      height: 20px;
+      background: #45475a;
+      border: 1px solid #585b70;
+      color: #cdd6f4;
+      cursor: pointer;
+      font-size: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      line-height: 1;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .collapse-btn:first-child {
+      border-radius: 4px 4px 0 0;
+      border-bottom: none;
+    }
+
+    .collapse-btn:last-child {
+      border-radius: 0 0 4px 4px;
+    }
+
+    .collapse-btn:hover {
+      background: #585b70;
+      color: #cba6f7;
+    }
+
+    .collapse-btn.pane-is-collapsed {
+      background: #313244;
+      color: #cba6f7;
+      border-color: #cba6f7;
+    }
+
+    /* Single visible button gets full rounded corners */
+    .collapse-toggle-wrap.left-only .collapse-btn:first-child,
+    .collapse-toggle-wrap.right-only .collapse-btn:last-child {
+      border-radius: 4px;
+      border-bottom: 1px solid #585b70;
+    }
+
+    .tab-panel webview.pane-collapsed {
+      flex: 0 0 0px !important;
+      min-width: 0 !important;
+      overflow: hidden;
     }
 
     #tab-menu {
@@ -233,6 +317,56 @@
     document.getElementById("edit-config").addEventListener("click", () => {
       window.electronAPI.openConfig();
     });
+
+    function collapsePane(webviews, index) {
+      webviews[index]._collapsed = true;
+      webviews[index].classList.add("pane-collapsed");
+      webviews.forEach((wv, i) => {
+        if (i !== index && !wv._collapsed) wv.style.flex = "1 1 0";
+      });
+      updateDividerStates(webviews);
+    }
+
+    function expandPane(webviews, index) {
+      webviews[index]._collapsed = false;
+      webviews[index].classList.remove("pane-collapsed");
+      webviews[index].style.flex = "";
+      webviews.forEach((wv) => {
+        if (!wv._collapsed) wv.style.flex = "1 1 0";
+      });
+      updateDividerStates(webviews);
+    }
+
+    function updateDividerStates(webviews) {
+      const panel = webviews[0]?.parentElement;
+      if (!panel) return;
+      const dividers = [...panel.querySelectorAll(".pane-divider")];
+      dividers.forEach((div, j) => {
+        const lCol = !!webviews[j]._collapsed;
+        const rCol = !!webviews[j + 1]._collapsed;
+        div.classList.toggle("pane-collapsed-adj", lCol || rCol);
+
+        if (div._leftBtn) {
+          div._leftBtn.style.display = (rCol && !lCol) ? "none" : "flex";
+          div._leftBtn.classList.toggle("pane-is-collapsed", lCol);
+          // Flip arrow outward when expanding: ◀ collapse → ▶ expand
+          div._leftBtn.textContent = lCol ? "▶" : "◀";
+          div._leftBtn.title = lCol ? "Expand left pane" : "Collapse left pane";
+        }
+        if (div._rightBtn) {
+          div._rightBtn.style.display = (lCol && !rCol) ? "none" : "flex";
+          div._rightBtn.classList.toggle("pane-is-collapsed", rCol);
+          // Flip arrow outward when expanding: ▶ collapse → ◀ expand
+          div._rightBtn.textContent = rCol ? "◀" : "▶";
+          div._rightBtn.title = rCol ? "Expand right pane" : "Collapse right pane";
+        }
+        if (div._toggleWrap) {
+          div._toggleWrap.classList.toggle("has-collapsed", lCol || rCol);
+          div._toggleWrap.classList.toggle("left-only", lCol && !rCol);
+          div._toggleWrap.classList.toggle("right-only", rCol && !lCol);
+        }
+      });
+    }
 
     function showTabMenu(e, webviews) {
       e.preventDefault();
@@ -364,11 +498,52 @@
         .forEach((p, i) => p.classList.toggle("active", i === index));
     }
 
-    function makeDividerResizable(divider, leftWv, rightWv, panel, webviews) {
+    function makeDividerResizable(divider, leftWv, rightWv, webviews, leftIdx) {
+      const rightIdx = leftIdx + 1;
+
+      // ── Two collapse buttons ──────────────────────────────────────────────
+      const wrap = document.createElement("div");
+      wrap.className = "collapse-toggle-wrap";
+      divider._toggleWrap = wrap;
+
+      const leftBtn = document.createElement("button");
+      leftBtn.className = "collapse-btn";
+      leftBtn.textContent = "◀";
+      leftBtn.title = "Collapse left pane";
+      divider._leftBtn = leftBtn;
+
+      const rightBtn = document.createElement("button");
+      rightBtn.className = "collapse-btn";
+      rightBtn.textContent = "▶";
+      rightBtn.title = "Collapse right pane";
+      divider._rightBtn = rightBtn;
+
+      wrap.appendChild(leftBtn);
+      wrap.appendChild(rightBtn);
+      divider.appendChild(wrap);
+
+      leftBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        leftWv._collapsed ? expandPane(webviews, leftIdx) : collapsePane(webviews, leftIdx);
+      });
+
+      rightBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        rightWv._collapsed ? expandPane(webviews, rightIdx) : collapsePane(webviews, rightIdx);
+      });
+
+      // ── Drag to resize ────────────────────────────────────────────────────
       divider.addEventListener("mousedown", (e) => {
+        if (e.target === leftBtn || e.target === rightBtn) return;
+        if (leftWv._collapsed || rightWv._collapsed) return;
         e.preventDefault();
         divider.classList.add("dragging");
         dragShield.style.display = "block";
+
+        // Lock every visible pane to its current px so others don't shift
+        webviews.forEach(wv => {
+          if (!wv._collapsed) wv.style.flex = `0 0 ${wv.offsetWidth}px`;
+        });
 
         const startX = e.clientX;
         const leftStart = leftWv.offsetWidth;
@@ -387,25 +562,10 @@
           dragShield.style.display = "none";
           document.removeEventListener("mousemove", onMove);
           document.removeEventListener("mouseup", onUp);
-          // Save ratios after drag ends
-          savePaneRatios(panel, webviews);
         }
 
         document.addEventListener("mousemove", onMove);
         document.addEventListener("mouseup", onUp);
-      });
-    }
-
-    function savePaneRatios(panel, webviews) {
-      const totalWidth = webviews.reduce((sum, wv) => sum + wv.offsetWidth, 0);
-      if (totalWidth === 0) return;
-      panel._paneRatios = webviews.map((wv) => wv.offsetWidth / totalWidth);
-    }
-
-    function applyPaneRatios(panel, webviews) {
-      if (!panel._paneRatios) return;
-      panel._paneRatios.forEach((ratio, i) => {
-        webviews[i].style.flex = `${ratio} ${ratio} 0`;
       });
     }
 
@@ -417,7 +577,7 @@
 
         const btn = document.createElement("button");
         btn.className = "tab" + (i === 0 ? " active" : "");
-        btn.textContent = tab.label;
+        btn.textContent = panes.length > 1 ? `${tab.label} (${panes.length})` : tab.label;
         btn.addEventListener("click", () => switchTo(i));
         btn.addEventListener("contextmenu", (e) => showTabMenu(e, webviews));
         tabBar.insertBefore(btn, document.getElementById("edit-config"));
@@ -443,16 +603,10 @@
         });
 
         dividers.forEach((divider, j) => {
-          makeDividerResizable(divider, webviews[j], webviews[j + 1], panel, webviews);
+          makeDividerResizable(divider, webviews[j], webviews[j + 1], webviews, j);
         });
 
         allTabWebviews.push(webviews);
-
-        if (webviews.length > 1) {
-          const ro = new ResizeObserver(() => applyPaneRatios(panel, webviews));
-          ro.observe(panel);
-        }
-
         views.appendChild(panel);
       });
     });
