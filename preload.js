@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
   webviewFind: (wcId, text, options) => ipcRenderer.invoke("webview-find", wcId, text, options),
   webviewStopFind: (wcId) => ipcRenderer.invoke("webview-stop-find", wcId),
   onFoundInPage: (cb) => ipcRenderer.on("found-in-page-result", (_, wcId, result) => cb(wcId, result)),
+  setSyncGroup: (wcIds, enable) => ipcRenderer.invoke("set-sync-group", wcIds, enable),
 });

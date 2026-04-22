@@ -3,6 +3,44 @@ app.commandLine.appendSwitch("enable-features", "WebviewTag");
 const path = require("path");
 const fs = require("fs");
 
+// Sync typing: wcId -> Set of peer wcIds to forward keyboard events to
+const syncGroups = new Map();
+
+// Maps a before-input-event to a document.execCommand script for peer panes.
+// executeJavaScript never triggers before-input-event, so no feedback loop is possible.
+function buildDispatchScript(input) {
+  const init = JSON.stringify({
+    key: input.key, code: input.code,
+    ctrlKey: !!input.control, metaKey: !!input.meta,
+    shiftKey: !!input.shift, altKey: !!input.alt,
+    bubbles: true, cancelable: true,
+  });
+  return `(document.activeElement||document.body).dispatchEvent(new KeyboardEvent('keydown',${init}))`;
+}
+
+function buildSyncScript(input) {
+  if (input.type !== "keyDown" && input.type !== "rawKeyDown") return null;
+  if (input.control || input.meta) {
+    switch (input.key.toLowerCase()) {
+      case "a": return `document.execCommand('selectAll')`;
+      case "z": return input.shift ? `document.execCommand('redo')` : `document.execCommand('undo')`;
+      case "y": return `document.execCommand('redo')`;
+    }
+    // Any other ctrl/meta combo (e.g. Ctrl+Enter, Ctrl+K): dispatch as KeyboardEvent
+    return buildDispatchScript(input);
+  }
+  if (input.key.length === 1) {
+    return `document.execCommand('insertText',false,${JSON.stringify(input.key)})`;
+  }
+  switch (input.key) {
+    case "Backspace": return `document.execCommand('delete')`;
+    case "Delete":    return `document.execCommand('forwardDelete')`;
+    case "Enter":     return `(function(){var el=document.activeElement||document.body;el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));var f=el.closest&&el.closest('form');if(f){var ev=new Event('submit',{bubbles:true,cancelable:true});f.dispatchEvent(ev);if(!ev.defaultPrevented)f.submit();}})()`;
+    case "Tab":       return `document.execCommand('insertText',false,'\\t')`;
+  }
+  return null;
+}
+
 const DEFAULT_APPS = [];
 
 function getConfigPath() {
@@ -44,6 +82,28 @@ ipcMain.handle("open-external", (_, url) => {
   shell.openExternal(url);
 });
 
+ipcMain.handle("set-sync-group", (_, wcIds, enable) => {
+  // Remove these wcIds from any existing sync group first
+  wcIds.forEach(id => {
+    if (syncGroups.has(id)) {
+      const peers = syncGroups.get(id);
+      peers.forEach(peerId => {
+        const peerGroup = syncGroups.get(peerId);
+        if (peerGroup) {
+          peerGroup.delete(id);
+          if (peerGroup.size === 0) syncGroups.delete(peerId);
+        }
+      });
+      syncGroups.delete(id);
+    }
+  });
+  if (enable && wcIds.length > 1) {
+    wcIds.forEach(id => {
+      syncGroups.set(id, new Set(wcIds.filter(p => p !== id)));
+    });
+  }
+});
+
 // Intercept all webview navigations at the main process level
 app.on("web-contents-created", (_, contents) => {
   // Only apply to webviews, not the main window
@@ -51,11 +111,22 @@ app.on("web-contents-created", (_, contents) => {
 
   // Intercept Ctrl+F so the webview doesn't swallow it
   contents.on("before-input-event", (e, input) => {
-    if ((input.control || input.meta) && input.key.toLowerCase() === "f" && input.type === "keyDown") {
+    if ((input.control || input.meta) && input.key.toLowerCase() === "f" && (input.type === "keyDown" || input.type === "rawKeyDown")) {
       e.preventDefault();
       const win = BrowserWindow.getAllWindows()[0];
       if (win) win.webContents.send("open-find-bar");
+      return;
     }
+
+    if (!contents.isFocused()) return;
+    const peers = syncGroups.get(contents.id);
+    if (!peers || peers.size === 0) return;
+    const script = buildSyncScript(input);
+    if (!script) return;
+    peers.forEach(peerId => {
+      const peer = webContents.fromId(peerId);
+      if (peer && !peer.isDestroyed()) peer.executeJavaScript(script).catch(() => {});
+    });
   });
 
   // Forward found-in-page results back to the renderer

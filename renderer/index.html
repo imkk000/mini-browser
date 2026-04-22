@@ -48,6 +48,12 @@
       font-weight: bold;
     }
 
+    .tab.sync-active::after {
+      content: " ⌨";
+      color: #a6e3a1;
+      font-size: 11px;
+    }
+
     #edit-config {
       margin-left: auto;
       margin-bottom: 4px;
@@ -234,7 +240,6 @@
       border-radius: 8px;
       padding: 6px 8px;
       box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-      display: none;
       align-items: center;
       gap: 6px;
     }
@@ -302,6 +307,7 @@
   <div id="tab-menu">
     <div class="tab-menu-item" id="menu-refresh">↻  Refresh</div>
     <div class="tab-menu-sep"></div>
+    <div id="menu-sync-section"></div>
     <div id="menu-inspect-items"></div>
   </div>
 
@@ -311,12 +317,25 @@
     const dragShield = document.getElementById("drag-shield");
     const tabMenu = document.getElementById("tab-menu");
     const menuInspectItems = document.getElementById("menu-inspect-items");
+    const menuSyncSection = document.getElementById("menu-sync-section");
     const allTabWebviews = [];
+    const tabSyncMode = [];
     let menuWebviews = [];
+    let menuTabIndex = -1;
 
     document.getElementById("edit-config").addEventListener("click", () => {
       window.electronAPI.openConfig();
     });
+
+    function updateSyncGroupForTab(webviews) {
+      const tabIndex = allTabWebviews.indexOf(webviews);
+      if (tabIndex === -1 || !tabSyncMode[tabIndex]) return;
+      const wcIds = webviews
+        .filter(wv => !wv._collapsed)
+        .map(wv => { try { return wv.getWebContentsId(); } catch { return null; } })
+        .filter(id => id !== null);
+      window.electronAPI.setSyncGroup(wcIds, wcIds.length > 1);
+    }
 
     function collapsePane(webviews, index) {
       webviews[index]._collapsed = true;
@@ -325,6 +344,7 @@
         if (i !== index && !wv._collapsed) wv.style.flex = "1 1 0";
       });
       updateDividerStates(webviews);
+      updateSyncGroupForTab(webviews);
     }
 
     function expandPane(webviews, index) {
@@ -335,6 +355,7 @@
         if (!wv._collapsed) wv.style.flex = "1 1 0";
       });
       updateDividerStates(webviews);
+      updateSyncGroupForTab(webviews);
     }
 
     function updateDividerStates(webviews) {
@@ -368,9 +389,38 @@
       });
     }
 
-    function showTabMenu(e, webviews) {
+    function showTabMenu(e, webviews, tabIndex) {
       e.preventDefault();
       menuWebviews = webviews;
+      menuTabIndex = tabIndex;
+
+      // Sync toggle (multi-pane only)
+      menuSyncSection.innerHTML = "";
+      if (webviews.length > 1) {
+        const syncOn = tabSyncMode[tabIndex];
+        const syncItem = document.createElement("div");
+        syncItem.className = "tab-menu-item";
+        syncItem.textContent = syncOn ? "⌨  Sync Typing: On" : "⌨  Sync Typing: Off";
+        if (syncOn) syncItem.style.color = "#a6e3a1";
+        syncItem.addEventListener("click", () => {
+          tabSyncMode[menuTabIndex] = !tabSyncMode[menuTabIndex];
+          const enabled = tabSyncMode[menuTabIndex];
+          const allWcIds = menuWebviews.map(wv => { try { return wv.getWebContentsId(); } catch { return null; } }).filter(id => id !== null);
+          if (enabled) {
+            const visibleWcIds = menuWebviews.filter(wv => !wv._collapsed).map(wv => { try { return wv.getWebContentsId(); } catch { return null; } }).filter(id => id !== null);
+            window.electronAPI.setSyncGroup(visibleWcIds, visibleWcIds.length > 1);
+          } else {
+            window.electronAPI.setSyncGroup(allWcIds, false);
+          }
+          const tabs = document.querySelectorAll(".tab");
+          if (tabs[menuTabIndex]) tabs[menuTabIndex].classList.toggle("sync-active", enabled);
+          hideTabMenu();
+        });
+        menuSyncSection.appendChild(syncItem);
+        const sep = document.createElement("div");
+        sep.className = "tab-menu-sep";
+        menuSyncSection.appendChild(sep);
+      }
 
       menuInspectItems.innerHTML = "";
       if (webviews.length === 1) {
@@ -579,7 +629,7 @@
         btn.className = "tab" + (i === 0 ? " active" : "");
         btn.textContent = panes.length > 1 ? `${tab.label} (${panes.length})` : tab.label;
         btn.addEventListener("click", () => switchTo(i));
-        btn.addEventListener("contextmenu", (e) => showTabMenu(e, webviews));
+        btn.addEventListener("contextmenu", (e) => showTabMenu(e, webviews, i));
         tabBar.insertBefore(btn, document.getElementById("edit-config"));
 
         const panel = document.createElement("div");
@@ -607,6 +657,7 @@
         });
 
         allTabWebviews.push(webviews);
+        tabSyncMode.push(false);
         views.appendChild(panel);
       });
     });
