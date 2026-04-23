@@ -1,4 +1,11 @@
-const { app, BrowserWindow, ipcMain, shell, webContents } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  webContents,
+  session,
+} = require("electron");
 app.commandLine.appendSwitch("enable-features", "WebviewTag");
 const path = require("path");
 const fs = require("fs");
@@ -10,10 +17,14 @@ const syncGroups = new Map();
 // executeJavaScript never triggers before-input-event, so no feedback loop is possible.
 function buildDispatchScript(input) {
   const init = JSON.stringify({
-    key: input.key, code: input.code,
-    ctrlKey: !!input.control, metaKey: !!input.meta,
-    shiftKey: !!input.shift, altKey: !!input.alt,
-    bubbles: true, cancelable: true,
+    key: input.key,
+    code: input.code,
+    ctrlKey: !!input.control,
+    metaKey: !!input.meta,
+    shiftKey: !!input.shift,
+    altKey: !!input.alt,
+    bubbles: true,
+    cancelable: true,
   });
   return `(document.activeElement||document.body).dispatchEvent(new KeyboardEvent('keydown',${init}))`;
 }
@@ -22,9 +33,14 @@ function buildSyncScript(input) {
   if (input.type !== "keyDown" && input.type !== "rawKeyDown") return null;
   if (input.control || input.meta) {
     switch (input.key.toLowerCase()) {
-      case "a": return `document.execCommand('selectAll')`;
-      case "z": return input.shift ? `document.execCommand('redo')` : `document.execCommand('undo')`;
-      case "y": return `document.execCommand('redo')`;
+      case "a":
+        return `document.execCommand('selectAll')`;
+      case "z":
+        return input.shift
+          ? `document.execCommand('redo')`
+          : `document.execCommand('undo')`;
+      case "y":
+        return `document.execCommand('redo')`;
     }
     // Any other ctrl/meta combo (e.g. Ctrl+Enter, Ctrl+K): dispatch as KeyboardEvent
     return buildDispatchScript(input);
@@ -33,10 +49,14 @@ function buildSyncScript(input) {
     return `document.execCommand('insertText',false,${JSON.stringify(input.key)})`;
   }
   switch (input.key) {
-    case "Backspace": return `document.execCommand('delete')`;
-    case "Delete":    return `document.execCommand('forwardDelete')`;
-    case "Enter":     return `(function(){var el=document.activeElement||document.body;el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));var f=el.closest&&el.closest('form');if(f){var ev=new Event('submit',{bubbles:true,cancelable:true});f.dispatchEvent(ev);if(!ev.defaultPrevented)f.submit();}})()`;
-    case "Tab":       return `document.execCommand('insertText',false,'\\t')`;
+    case "Backspace":
+      return `document.execCommand('delete')`;
+    case "Delete":
+      return `document.execCommand('forwardDelete')`;
+    case "Enter":
+      return `(function(){var el=document.activeElement||document.body;el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));var f=el.closest&&el.closest('form');if(f){var ev=new Event('submit',{bubbles:true,cancelable:true});f.dispatchEvent(ev);if(!ev.defaultPrevented)f.submit();}})()`;
+    case "Tab":
+      return `document.execCommand('insertText',false,'\\t')`;
   }
   return null;
 }
@@ -84,10 +104,10 @@ ipcMain.handle("open-external", (_, url) => {
 
 ipcMain.handle("set-sync-group", (_, wcIds, enable) => {
   // Remove these wcIds from any existing sync group first
-  wcIds.forEach(id => {
+  wcIds.forEach((id) => {
     if (syncGroups.has(id)) {
       const peers = syncGroups.get(id);
-      peers.forEach(peerId => {
+      peers.forEach((peerId) => {
         const peerGroup = syncGroups.get(peerId);
         if (peerGroup) {
           peerGroup.delete(id);
@@ -98,8 +118,8 @@ ipcMain.handle("set-sync-group", (_, wcIds, enable) => {
     }
   });
   if (enable && wcIds.length > 1) {
-    wcIds.forEach(id => {
-      syncGroups.set(id, new Set(wcIds.filter(p => p !== id)));
+    wcIds.forEach((id) => {
+      syncGroups.set(id, new Set(wcIds.filter((p) => p !== id)));
     });
   }
 });
@@ -111,7 +131,11 @@ app.on("web-contents-created", (_, contents) => {
 
   // Intercept Ctrl+F so the webview doesn't swallow it
   contents.on("before-input-event", (e, input) => {
-    if ((input.control || input.meta) && input.key.toLowerCase() === "f" && (input.type === "keyDown" || input.type === "rawKeyDown")) {
+    if (
+      (input.control || input.meta) &&
+      input.key.toLowerCase() === "f" &&
+      (input.type === "keyDown" || input.type === "rawKeyDown")
+    ) {
       e.preventDefault();
       const win = BrowserWindow.getAllWindows()[0];
       if (win) win.webContents.send("open-find-bar");
@@ -123,9 +147,10 @@ app.on("web-contents-created", (_, contents) => {
     if (!peers || peers.size === 0) return;
     const script = buildSyncScript(input);
     if (!script) return;
-    peers.forEach(peerId => {
+    peers.forEach((peerId) => {
       const peer = webContents.fromId(peerId);
-      if (peer && !peer.isDestroyed()) peer.executeJavaScript(script).catch(() => {});
+      if (peer && !peer.isDestroyed())
+        peer.executeJavaScript(script).catch(() => { });
     });
   });
 
@@ -196,7 +221,17 @@ function createWindow() {
   win.setMenuBarVisibility(false);
 }
 
-app.whenReady().then(createWindow);
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3";
+
+app.on("session-created", (sess) => {
+  sess.setUserAgent(CHROME_UA);
+});
+
+app.whenReady().then(() => {
+  session.defaultSession.setUserAgent(CHROME_UA);
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

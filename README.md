@@ -18,6 +18,7 @@ I want to bunch my many applications such as freshrss into single browser withou
 - `F12` opens DevTools for all panes in the active tab
 - Edit Config button opens `apps.json` in your default editor
 - External links open in the system browser
+- Custom user agent — all webviews (including partitioned sessions) send a Chrome UA
 
 ## Build & Install
 
@@ -78,26 +79,6 @@ While enabled, whatever you type in any pane is forwarded to all other visible p
 **Synced inputs:** characters, `Backspace`, `Delete`, `Enter` (including form submit), `Tab`, `Ctrl+A`, `Ctrl+Z` / `Ctrl+Shift+Z` (undo/redo), `Ctrl+Y`, and any other modifier combinations (e.g. `Ctrl+Enter`).
 
 **Before typing:** click into an editable field (input, textarea, rich text editor) in each pane first — sync targets the currently focused element in each pane.
-
-## What was built in this session
-
-### Sync typing mode (`main.js`, `preload.js`, `renderer/index.html`)
-
-Implemented tmux-style synchronized typing across panes in a tab.
-
-**How it works:**
-- `before-input-event` in the main process intercepts keystrokes from the focused webview
-- `webContents.isFocused()` guards against feedback loops — only the pane the user is actually typing in forwards events
-- Keystrokes are injected into peer panes via `executeJavaScript` + `document.execCommand` (not `sendInputEvent`, which caused app freezes due to triggering `before-input-event` in the target pane and creating a forwarding loop)
-- Modifier combos not handled by `execCommand` (e.g. `Ctrl+Enter`) are dispatched as synthetic `KeyboardEvent`s
-- `Enter` dispatches a `keydown` event AND submits the nearest `<form>` to support search engines
-
-**Bugs fixed along the way:**
-- `sendInputEvent` caused app freeze → replaced with `executeJavaScript`
-- Characters not syncing → `char` event type never fires in `before-input-event`; handle printable chars via `keyDown` with `input.key.length === 1`
-- Ctrl+F not intercepted on macOS → check now matches both `keyDown` and `rawKeyDown`
-- Duplicate `display: none` in `#find-bar` CSS removed
-- Collapsed panes excluded from sync group; re-added on expand
 
 ## Preview
 
