@@ -7,6 +7,8 @@ const {
   session,
 } = require("electron");
 app.commandLine.appendSwitch("enable-features", "WebviewTag");
+// Stops WebRTC from leaking LAN IPs via STUN — only public iface is exposed.
+app.commandLine.appendSwitch("webrtc-ip-handling-policy", "default_public_interface_only");
 const path = require("path");
 const fs = require("fs");
 
@@ -67,24 +69,113 @@ function getConfigPath() {
   return path.join(app.getPath("userData"), "apps.json");
 }
 
-function loadApps() {
+function loadConfig() {
   const cfgPath = getConfigPath();
   if (!fs.existsSync(cfgPath)) {
-    // Write a default config on first run
     fs.writeFileSync(cfgPath, JSON.stringify(DEFAULT_APPS, null, 2));
-    return DEFAULT_APPS;
+    return { tabs: DEFAULT_APPS };
   }
   try {
-    return JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+    const raw = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+    // Legacy: top-level array is the tab list. New: object with tabs + doh.
+    if (Array.isArray(raw)) return { tabs: raw };
+    return { tabs: raw.tabs || [], doh: raw.doh };
   } catch (e) {
     console.error("Invalid apps.json, using defaults:", e.message);
-    return DEFAULT_APPS;
+    return { tabs: DEFAULT_APPS };
   }
+}
+
+function loadApps() {
+  return loadConfig().tabs;
+}
+
+function applyDoh(doh) {
+  if (!doh) return;
+  const norm = typeof doh === "string"
+    ? { mode: "secure", servers: [doh] }
+    : { mode: doh.mode || "secure", servers: [].concat(doh.servers || doh.server || []) };
+  if (!norm.servers.length) {
+    console.warn("[doh] no servers configured; ignoring");
+    return;
+  }
+  app.configureHostResolver({
+    enableBuiltInResolver: true,
+    secureDnsMode: norm.mode,
+    secureDnsServers: norm.servers,
+  });
 }
 
 // Respond to renderer asking for apps
 ipcMain.handle("get-apps", () => {
   return loadApps();
+});
+
+// host:port -> { username, password } — used by app.on('login') to answer
+// proxy auth challenges for SOCKS5/HTTP proxies whose credentials came from the URL.
+const proxyAuth = new Map();
+
+function parseProxy(proxy) {
+  try {
+    const u = new URL(proxy);
+    return {
+      proxyRules: `${u.protocol}//${u.host}`,
+      host: u.hostname,
+      port: u.port,
+      username: decodeURIComponent(u.username || ""),
+      password: decodeURIComponent(u.password || ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function configureProxies(apps) {
+  // Walk panes once, resolving partition -> proxy. Conflicts within a partition
+  // can't be honored (proxy is per-session); first wins, with a warning.
+  const partitionProxy = new Map();
+  for (const tab of apps) {
+    for (const pane of tab.panes || []) {
+      if (!pane.proxy) continue;
+      if (!pane.partition) {
+        console.warn(`[proxy] pane "${pane.url}" needs a "partition" to use a proxy; ignoring`);
+        continue;
+      }
+      const prev = partitionProxy.get(pane.partition);
+      if (prev && prev !== pane.proxy) {
+        console.warn(`[proxy] partition "${pane.partition}" has conflicting proxies; keeping ${prev}`);
+        continue;
+      }
+      partitionProxy.set(pane.partition, pane.proxy);
+    }
+  }
+  for (const [partition, proxy] of partitionProxy) {
+    const parsed = parseProxy(proxy);
+    if (!parsed) {
+      console.error(`[proxy] invalid proxy URL for "${partition}": ${proxy}`);
+      continue;
+    }
+    if (parsed.username) {
+      proxyAuth.set(`${parsed.host}:${parsed.port}`, {
+        username: parsed.username,
+        password: parsed.password,
+      });
+    }
+    const sess = session.fromPartition(partition);
+    try {
+      await sess.setProxy({ proxyRules: parsed.proxyRules, proxyBypassRules: "<local>" });
+    } catch (e) {
+      console.error(`[proxy] setProxy failed for "${partition}":`, e.message);
+    }
+  }
+}
+
+app.on("login", (event, _wc, _req, authInfo, callback) => {
+  if (!authInfo.isProxy) return;
+  const creds = proxyAuth.get(`${authInfo.host}:${authInfo.port}`);
+  if (!creds) return;
+  event.preventDefault();
+  callback(creds.username, creds.password);
 });
 
 const SAFE_PROTOCOLS = new Set(["https:", "http:"]);
@@ -221,15 +312,69 @@ function createWindow() {
   win.setMenuBarVisibility(false);
 }
 
+const CHROME_VERSION = "146";
 const CHROME_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3";
+  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION}.0.0.0 Safari/537.36`;
+const SEC_CH_UA = `"Chromium";v="${CHROME_VERSION}", "Not-A.Brand";v="24", "Google Chrome";v="${CHROME_VERSION}"`;
+const WEBVIEW_PRELOAD = path.join(__dirname, "renderer", "webview-preload.js");
 
-app.on("session-created", (sess) => {
-  sess.setUserAgent(CHROME_UA);
-});
+// Electron auto-grants every permission by default — switch to deny-by-default.
+// Allowlist covers things normal apps need (camera/mic for meets, fullscreen, etc.).
+const ALLOWED_PERMISSIONS = new Set([
+  "media",
+  "display-capture",
+  "fullscreen",
+  "pointerLock",
+  "clipboard-sanitized-write",
+]);
 
-app.whenReady().then(() => {
-  session.defaultSession.setUserAgent(CHROME_UA);
+function hardenSession(sess) {
+  sess.setUserAgent(CHROME_UA, "en-US,en");
+  const preloads = new Set(sess.getPreloads());
+  preloads.add(WEBVIEW_PRELOAD);
+  sess.setPreloads([...preloads]);
+  sess.webRequest.onBeforeSendHeaders((details, callback) => {
+    const h = details.requestHeaders;
+    if (details.url.startsWith("https://")) {
+      h["Sec-Ch-Ua"] = SEC_CH_UA;
+      h["Sec-Ch-Ua-Mobile"] = "?0";
+      h["Sec-Ch-Ua-Platform"] = '"Windows"';
+    } else {
+      delete h["Sec-Ch-Ua"];
+      delete h["Sec-Ch-Ua-Mobile"];
+      delete h["Sec-Ch-Ua-Platform"];
+    }
+    // Pin Accept-Language so the OS/Chromium locale can never leak through.
+    h["Accept-Language"] = "en-US,en;q=0.9";
+    h["Accept-Encoding"] = "gzip, deflate";
+    delete h["Upgrade-Insecure-Requests"];
+    delete h["Available-Dictionary"];
+    delete h["Sec-Available-Dictionary"];
+    delete h["Dictionary-Id"];
+    // Trim Referer to origin only — stricter than Chrome's default
+    // strict-origin-when-cross-origin (drops same-origin path leaks too).
+    if (h["Referer"]) {
+      try {
+        h["Referer"] = new URL(h["Referer"]).origin + "/";
+      } catch {
+        delete h["Referer"];
+      }
+    }
+    callback({ requestHeaders: h });
+  });
+  sess.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(ALLOWED_PERMISSIONS.has(permission));
+  });
+  sess.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
+}
+
+app.on("session-created", hardenSession);
+
+app.whenReady().then(async () => {
+  const cfg = loadConfig();
+  hardenSession(session.defaultSession);
+  applyDoh(cfg.doh);
+  await configureProxies(cfg.tabs);
   createWindow();
 });
 
