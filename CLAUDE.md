@@ -5,6 +5,7 @@
 Electron app that wraps multiple web apps into a single window with tabs and split panes. No build step, no framework — single-file renderer.
 
 **Key files:**
+
 - `main.js` — main process: IPC handlers, navigation safety, sync typing, session hardening, proxies, DoH
 - `preload.js` — contextBridge exposing `window.electronAPI` to renderer (host window only)
 - `renderer/webview-preload.js` — runs in every webview frame; spoofs `navigator.userAgentData` / `platform` / `languages` / `webdriver` to match the HTTP-level UA
@@ -33,7 +34,11 @@ Two formats are accepted. Legacy (top-level array of tabs):
   {
     "label": "Tab name",
     "panes": [
-      { "url": "https://example.com", "partition": "persist:name", "proxy": "socks5://user:pass@127.0.0.1:1080" }
+      {
+        "url": "https://example.com",
+        "partition": "persist:name",
+        "proxy": "socks5://user:pass@127.0.0.1:1080"
+      }
     ]
   }
 ]
@@ -57,6 +62,7 @@ Multiple entries in `panes` create a split-pane layout. `partition` is optional;
 ## Architecture notes
 
 ### Session hardening
+
 `hardenSession(sess)` is applied to `defaultSession` at startup and to every session created later (`app.on('session-created')`). It does:
 
 - **UA spoof** — `setUserAgent(CHROME_UA, "en-US,en")`. UA claims Windows + Chrome `CHROME_VERSION` (kept in sync with the bundled Chromium so the JS API surface matches the spoof). Second arg pins `Accept-Language`.
@@ -67,29 +73,35 @@ Multiple entries in `panes` create a split-pane layout. `partition` is optional;
   - `Accept-Encoding` forced to `gzip, deflate` (drops `br`, `zstd`).
   - `Upgrade-Insecure-Requests`, `Available-Dictionary`, `Sec-Available-Dictionary`, `Dictionary-Id` deleted.
   - `Referer` trimmed to origin only via `new URL(ref).origin`.
-- **Permissions** — `setPermissionRequestHandler` + `setPermissionCheckHandler` deny by default. Allowlist: `media`, `display-capture`, `fullscreen`, `pointerLock`, `clipboard-sanitized-write`. Electron's default is *grant all*, so this is a meaningful tightening.
+- **Permissions** — `setPermissionRequestHandler` + `setPermissionCheckHandler` deny by default. Allowlist: `media`, `display-capture`, `fullscreen`, `pointerLock`, `clipboard-sanitized-write`. Electron's default is _grant all_, so this is a meaningful tightening.
 
 `webrtc-ip-handling-policy=default_public_interface_only` is appended via `app.commandLine` to stop LAN-IP STUN leaks.
 
 **Trade-off knobs** — these spoofs/strips diverge from real Chrome and can trigger anti-bot challenges (Google reCAPTCHA, Cloudflare):
+
 - Forcing `Accept-Encoding: gzip, deflate` and dropping `Upgrade-Insecure-Requests` are the loudest tells. If captchas are unbearable, restore both to match Chrome 146 (`gzip, deflate, br, zstd` and `Upgrade-Insecure-Requests: 1` on top-level navigations).
 - Always-trimmed `Referer` is stricter than Chrome's default `strict-origin-when-cross-origin`. Softening to cross-origin-only is the obvious dial-down.
 
 ### Proxies (per session)
+
 `configureProxies(tabs)` runs at startup, after `hardenSession` (so partitioned sessions are already hardened by the time `setProxy` runs). Walks panes, builds `partition → proxy` map, calls `session.fromPartition(p).setProxy({ proxyRules, proxyBypassRules: "<local>" })`. URL credentials are extracted into a `proxyAuth` map; `app.on('login')` answers proxy auth challenges from that map.
 
 Constraints baked into the design:
+
 - **Proxy is per-session, not per-webview** in Electron. A pane with `proxy` must also set `partition`. Panes sharing a partition share one proxy — first wins, conflicts logged.
 - `<local>` bypass keeps localhost direct.
 - Restart required to pick up proxy config changes.
 
 ### DoH (DNS-over-HTTPS, app-wide)
+
 `applyDoh(doh)` calls `app.configureHostResolver({ enableBuiltInResolver: true, secureDnsMode, secureDnsServers })`. **Per-session DoH is not supported by Electron** — `configureHostResolver` is process-global and there's no `Session.setSecureDns`. For per-pane DNS isolation, use `proxy` (SOCKS5 proxies resolve hostnames at the proxy, so each pane's DNS path follows its proxy). DoH only applies to non-proxied destinations.
 
 ### User agent
+
 The Chrome version in `CHROME_UA` and `SEC_CH_UA` should track the Chromium version bundled with the current Electron major (Electron 41 → Chromium 146, etc.). Mismatched versions cause anti-bot scoring AND can cause real JS API breaks if the spoofed version claims newer-than-actual Chromium.
 
 ### Sync typing
+
 Forwards keystrokes from the focused pane to all other visible panes in the active tab (tmux synchronize-panes style).
 
 - `before-input-event` in main process intercepts keys; `contents.isFocused()` guards against loops
@@ -101,9 +113,13 @@ Forwards keystrokes from the focused pane to all other visible panes in the acti
 State: `tabSyncMode[]` / `allTabWebviews[]` in renderer; `syncGroups` Map in main; IPC: `set-sync-group(wcIds, enable)`.
 
 ### Navigation safety
+
 Cross-origin navigations are blocked in `will-navigate` and `setWindowOpenHandler` — they open in the system browser via `shell.openExternal`. Only `http:` and `https:` are allowed.
 
+Exception: `AUTH_HOSTS` (`accounts.google.com`, `accounts.youtube.com`) for OAuth sign-in. Navigations _to_ an auth host stay in the pane, and navigations _from_ an auth host (the redirect back to the app) are allowed to any host. `window.open` to an auth host opens an in-app popup (`action: "allow"`, inherits the pane's partition and keeps `window.opener` so popup-mode sign-in can `postMessage` back). Add other identity providers to `AUTH_HOSTS` as needed.
+
 ### Find in page
+
 `Ctrl+F` is intercepted in `before-input-event` (before the webview can swallow it) and triggers `wc.findInPage` via IPC. Results are forwarded back to the renderer via `found-in-page-result`.
 
 ## Coding conventions

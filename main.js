@@ -180,6 +180,17 @@ app.on("login", (event, _wc, _req, authInfo, callback) => {
 
 const SAFE_PROTOCOLS = new Set(["https:", "http:"]);
 
+const AUTH_HOSTS = new Set(["accounts.google.com", "accounts.youtube.com"]);
+
+function isAuthUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && AUTH_HOSTS.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function isSafeUrl(url) {
   try {
     return SAFE_PROTOCOLS.has(new URL(url).protocol);
@@ -256,7 +267,9 @@ app.on("web-contents-created", (_, contents) => {
     try {
       const current = new URL(contents.getURL());
       const next = new URL(url);
-      if (next.hostname !== current.hostname || next.port !== current.port) {
+      const crossOrigin =
+        next.hostname !== current.hostname || next.port !== current.port;
+      if (crossOrigin && !isAuthUrl(url) && !isAuthUrl(contents.getURL())) {
         e.preventDefault();
         if (isSafeUrl(url)) shell.openExternal(url);
       }
@@ -267,6 +280,16 @@ app.on("web-contents-created", (_, contents) => {
 
   // Also handle target="_blank" links
   contents.setWindowOpenHandler(({ url }) => {
+    if (isAuthUrl(url)) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 500,
+          height: 700,
+          autoHideMenuBar: true,
+        },
+      };
+    }
     if (isSafeUrl(url)) shell.openExternal(url);
     return { action: "deny" };
   });
