@@ -48,6 +48,12 @@
       font-weight: bold;
     }
 
+    .tab.auto-refresh-active::before {
+      content: "⟳ ";
+      color: #89b4fa;
+      font-size: 11px;
+    }
+
     .tab.sync-active::after {
       content: " ⌨";
       color: #a6e3a1;
@@ -223,6 +229,23 @@
       color: #cba6f7;
     }
 
+    .tab-menu-subitem {
+      padding: 6px 16px 6px 36px;
+      font-size: 12px;
+    }
+
+    .tab-menu-subitem.selected {
+      color: #a6e3a1;
+    }
+
+    #menu-auto-refresh-options {
+      display: none;
+    }
+
+    #menu-auto-refresh-options.open {
+      display: block;
+    }
+
     .tab-menu-sep {
       height: 1px;
       background: #45475a;
@@ -306,6 +329,8 @@
 
   <div id="tab-menu">
     <div class="tab-menu-item" id="menu-refresh">↻  Refresh</div>
+    <div class="tab-menu-item" id="menu-auto-refresh"></div>
+    <div id="menu-auto-refresh-options"></div>
     <div class="tab-menu-sep"></div>
     <div id="menu-sync-section"></div>
     <div id="menu-inspect-items"></div>
@@ -318,8 +343,21 @@
     const tabMenu = document.getElementById("tab-menu");
     const menuInspectItems = document.getElementById("menu-inspect-items");
     const menuSyncSection = document.getElementById("menu-sync-section");
+    const menuAutoRefresh = document.getElementById("menu-auto-refresh");
+    const menuAutoRefreshOptions = document.getElementById("menu-auto-refresh-options");
     const allTabWebviews = [];
     const tabSyncMode = [];
+    const tabRefreshSeconds = [];
+    const tabRefreshTimers = [];
+    const REFRESH_INTERVALS = [
+      { label: "Off", seconds: 0 },
+      { label: "30 seconds", seconds: 30 },
+      { label: "1 minute", seconds: 60 },
+      { label: "5 minutes", seconds: 300 },
+      { label: "15 minutes", seconds: 900 },
+      { label: "30 minutes", seconds: 1800 },
+      { label: "1 hour", seconds: 3600 },
+    ];
     let menuWebviews = [];
     let menuTabIndex = -1;
 
@@ -389,10 +427,49 @@
       });
     }
 
+    function setTabAutoRefresh(tabIndex, seconds) {
+      clearInterval(tabRefreshTimers[tabIndex]);
+      tabRefreshTimers[tabIndex] = null;
+      tabRefreshSeconds[tabIndex] = seconds;
+      if (seconds > 0) {
+        tabRefreshTimers[tabIndex] = setInterval(() => {
+          allTabWebviews[tabIndex].forEach((wv) => wv.reload());
+        }, seconds * 1000);
+      }
+      const tab = document.querySelectorAll(".tab")[tabIndex];
+      if (tab) {
+        tab.classList.toggle("auto-refresh-active", seconds > 0);
+        tab.title = seconds > 0 ? `Auto refresh every ${refreshIntervalLabel(seconds)}` : "";
+      }
+    }
+
+    function refreshIntervalLabel(seconds) {
+      return REFRESH_INTERVALS.find((o) => o.seconds === seconds)?.label ?? `${seconds} seconds`;
+    }
+
+    function renderAutoRefreshMenu(tabIndex) {
+      const current = tabRefreshSeconds[tabIndex] || 0;
+      menuAutoRefresh.textContent = `⟳  Auto Refresh: ${refreshIntervalLabel(current)}  ▸`;
+      menuAutoRefresh.style.color = current > 0 ? "#89b4fa" : "";
+      menuAutoRefreshOptions.classList.remove("open");
+      menuAutoRefreshOptions.innerHTML = "";
+      REFRESH_INTERVALS.forEach(({ label, seconds }) => {
+        const item = document.createElement("div");
+        item.className = "tab-menu-item tab-menu-subitem" + (seconds === current ? " selected" : "");
+        item.textContent = (seconds === current ? "✓ " : "") + label;
+        item.addEventListener("click", () => {
+          setTabAutoRefresh(menuTabIndex, seconds);
+          hideTabMenu();
+        });
+        menuAutoRefreshOptions.appendChild(item);
+      });
+    }
+
     function showTabMenu(e, webviews, tabIndex) {
       e.preventDefault();
       menuWebviews = webviews;
       menuTabIndex = tabIndex;
+      renderAutoRefreshMenu(tabIndex);
 
       // Sync toggle (multi-pane only)
       menuSyncSection.innerHTML = "";
@@ -455,6 +532,18 @@
     document.getElementById("menu-refresh").addEventListener("click", () => {
       menuWebviews.forEach((wv) => wv.reload());
       hideTabMenu();
+    });
+
+    menuAutoRefresh.addEventListener("click", () => {
+      menuAutoRefreshOptions.classList.toggle("open");
+      menuAutoRefresh.textContent = menuAutoRefresh.textContent.replace(
+        /[▸▾]$/,
+        menuAutoRefreshOptions.classList.contains("open") ? "▾" : "▸"
+      );
+      const overflow = tabMenu.getBoundingClientRect().bottom - (window.innerHeight - 4);
+      if (overflow > 0) {
+        tabMenu.style.top = Math.max(4, tabMenu.offsetTop - overflow) + "px";
+      }
     });
 
     document.addEventListener("mousedown", (e) => {
@@ -658,6 +747,7 @@
 
         allTabWebviews.push(webviews);
         tabSyncMode.push(false);
+        tabRefreshSeconds.push(0);
         views.appendChild(panel);
       });
     });
