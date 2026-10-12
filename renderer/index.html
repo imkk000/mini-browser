@@ -350,13 +350,13 @@
     const tabRefreshSeconds = [];
     const tabRefreshTimers = [];
     const REFRESH_INTERVALS = [
-      { label: "Off", seconds: 0 },
-      { label: "30 seconds", seconds: 30 },
-      { label: "1 minute", seconds: 60 },
-      { label: "5 minutes", seconds: 300 },
-      { label: "15 minutes", seconds: 900 },
-      { label: "30 minutes", seconds: 1800 },
-      { label: "1 hour", seconds: 3600 },
+      { label: "Off", short: "off", seconds: 0 },
+      { label: "30 seconds", short: "30s", seconds: 30 },
+      { label: "1 minute", short: "1m", seconds: 60 },
+      { label: "5 minutes", short: "5m", seconds: 300 },
+      { label: "15 minutes", short: "15m", seconds: 900 },
+      { label: "30 minutes", short: "30m", seconds: 1800 },
+      { label: "1 hour", short: "1h", seconds: 3600 },
     ];
     let menuWebviews = [];
     let menuTabIndex = -1;
@@ -749,6 +749,16 @@
         tabSyncMode.push(false);
         tabRefreshSeconds.push(0);
         views.appendChild(panel);
+
+        if (tab.refresh !== undefined) {
+          const interval = REFRESH_INTERVALS.find((o) => o.short === tab.refresh || o.seconds === tab.refresh);
+          if (interval) {
+            setTabAutoRefresh(i, interval.seconds);
+          } else {
+            const allowed = REFRESH_INTERVALS.map((o) => `"${o.short}"`).join(", ");
+            console.warn(`[refresh] tab "${tab.label}" has invalid refresh ${JSON.stringify(tab.refresh)}; allowed: ${allowed}`);
+          }
+        }
       });
     });
   </script>

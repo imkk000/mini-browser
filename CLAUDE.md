@@ -57,6 +57,8 @@ New (object with optional app-wide settings):
 
 Multiple entries in `panes` create a split-pane layout. `partition` is optional; use `persist:` prefix to keep cookies/storage across restarts. `proxy` is optional and accepts any Chromium-supported URL (`socks5://`, `socks4://`, `http://`, `https://`); credentials embedded in the URL are answered via `app.on('login')`. Proxy is per-**session**, so a pane with `proxy` must also have `partition` (panes sharing a partition share one proxy — first config wins, conflicts are logged).
 
+`refresh` is optional on a tab (not a pane) and starts auto refresh at launch for all panes in that tab. Must be one of the menu values: `"30s"`, `"1m"`, `"5m"`, `"15m"`, `"30m"`, `"1h"`, `"off"` (the equivalent number of seconds, e.g. `1800`, also works). Invalid values are ignored with a console warning. It can still be changed from the tab's right-click menu at runtime.
+
 `doh` is optional and applies app-wide via `app.configureHostResolver`. Accepts either a string (DoH URL, mode defaults to `secure`) or an object `{ "mode": "secure" | "automatic" | "off", "servers": ["https://..."] }`. `secure` mode requires DoH to succeed (no fallback to system DNS); `automatic` falls back. DoH does not apply to destinations routed through a SOCKS5 proxy — the proxy resolves those.
 
 ## Architecture notes
@@ -136,7 +138,6 @@ Candidate features the user is considering. Don't implement unless asked, but de
 - **Persistent layout state** — pane sizes, last-active tab, scroll position; separate state file in `userData`, written on resize/tab-switch
 - **Keyboard nav** — `Ctrl+1..9` tab jump, `Ctrl+R` focused-pane reload, `Ctrl+W` close-or-collapse; intercept in renderer with care not to swallow shortcuts apps care about
 - **Per-pane mute** via `webContents.setAudioMuted` in the right-click menu
-- **Per-pane auto-reload interval** (`"reload": 300` seconds in the pane config)
 - **Profile switcher** — multiple `apps.json` files
 - **Per-pane userCSS** — `webContents.insertCSS` on `dom-ready`
 - **Back / forward buttons** per pane
