@@ -101,11 +101,30 @@
       display: flex;
     }
 
-    .tab-panel webview {
+    .tab-panel .pane {
       flex: 1 1 0;
       height: 100%;
       min-width: 80px;
+      display: flex;
+      flex-direction: column;
       transition: flex 0.2s ease;
+    }
+
+    .pane-name {
+      flex-shrink: 0;
+      padding: 3px 10px;
+      background: #181825;
+      color: #a6adc8;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-bottom: 1px solid #313244;
+    }
+
+    .pane webview {
+      flex: 1 1 0;
+      min-height: 0;
     }
 
     .pane-divider {
@@ -198,7 +217,7 @@
       border-bottom: 1px solid #585b70;
     }
 
-    .tab-panel webview.pane-collapsed {
+    .tab-panel .pane.pane-collapsed {
       flex: 0 0 0px !important;
       min-width: 0 !important;
       overflow: hidden;
@@ -377,9 +396,9 @@
 
     function collapsePane(webviews, index) {
       webviews[index]._collapsed = true;
-      webviews[index].classList.add("pane-collapsed");
+      webviews[index]._pane.classList.add("pane-collapsed");
       webviews.forEach((wv, i) => {
-        if (i !== index && !wv._collapsed) wv.style.flex = "1 1 0";
+        if (i !== index && !wv._collapsed) wv._pane.style.flex = "1 1 0";
       });
       updateDividerStates(webviews);
       updateSyncGroupForTab(webviews);
@@ -387,17 +406,17 @@
 
     function expandPane(webviews, index) {
       webviews[index]._collapsed = false;
-      webviews[index].classList.remove("pane-collapsed");
-      webviews[index].style.flex = "";
+      webviews[index]._pane.classList.remove("pane-collapsed");
+      webviews[index]._pane.style.flex = "";
       webviews.forEach((wv) => {
-        if (!wv._collapsed) wv.style.flex = "1 1 0";
+        if (!wv._collapsed) wv._pane.style.flex = "1 1 0";
       });
       updateDividerStates(webviews);
       updateSyncGroupForTab(webviews);
     }
 
     function updateDividerStates(webviews) {
-      const panel = webviews[0]?.parentElement;
+      const panel = webviews[0]?._pane.parentElement;
       if (!panel) return;
       const dividers = [...panel.querySelectorAll(".pane-divider")];
       dividers.forEach((div, j) => {
@@ -510,7 +529,7 @@
         webviews.forEach((wv, i) => {
           const item = document.createElement("div");
           item.className = "tab-menu-item";
-          item.textContent = `⬡  Inspect Pane ${i + 1}`;
+          item.textContent = `⬡  Inspect ${wv._name || `Pane ${i + 1}`}`;
           item.addEventListener("click", () => { wv.openDevTools(); hideTabMenu(); });
           menuInspectItems.appendChild(item);
         });
@@ -681,19 +700,19 @@
 
         // Lock every visible pane to its current px so others don't shift
         webviews.forEach(wv => {
-          if (!wv._collapsed) wv.style.flex = `0 0 ${wv.offsetWidth}px`;
+          if (!wv._collapsed) wv._pane.style.flex = `0 0 ${wv._pane.offsetWidth}px`;
         });
 
         const startX = e.clientX;
-        const leftStart = leftWv.offsetWidth;
-        const rightStart = rightWv.offsetWidth;
+        const leftStart = leftWv._pane.offsetWidth;
+        const rightStart = rightWv._pane.offsetWidth;
 
         function onMove(e) {
           const delta = e.clientX - startX;
           const newLeft = Math.max(80, leftStart + delta);
           const newRight = Math.max(80, rightStart - delta);
-          leftWv.style.flex = `0 0 ${newLeft}px`;
-          rightWv.style.flex = `0 0 ${newRight}px`;
+          leftWv._pane.style.flex = `0 0 ${newLeft}px`;
+          rightWv._pane.style.flex = `0 0 ${newRight}px`;
         }
 
         function onUp() {
@@ -708,8 +727,8 @@
       });
     }
 
-    // Config format: [{label, panes: [{url, partition}, ...]}]
-    // Single pane: panes with one entry, or shorthand panes: {url, partition}
+    // Config format: [{label, panes: [{url, partition, name}, ...]}]
+    // Single pane: panes with one entry, or shorthand panes: {url, partition, name}
     window.electronAPI.getApps().then((tabs) => {
       tabs.forEach((tab, i) => {
         const panes = Array.isArray(tab.panes) ? tab.panes : [tab.panes];
@@ -733,11 +752,23 @@
             panel.appendChild(divider);
             dividers.push(divider);
           }
+          const paneEl = document.createElement("div");
+          paneEl.className = "pane";
+          if (pane.name) {
+            const nameEl = document.createElement("div");
+            nameEl.className = "pane-name";
+            nameEl.textContent = pane.name;
+            nameEl.title = pane.name;
+            paneEl.appendChild(nameEl);
+          }
           const wv = document.createElement("webview");
           wv.src = pane.url;
           if (pane.partition) wv.partition = pane.partition;
           wv.setAttribute("allowpopups", "");
-          panel.appendChild(wv);
+          wv._pane = paneEl;
+          wv._name = pane.name;
+          paneEl.appendChild(wv);
+          panel.appendChild(paneEl);
           webviews.push(wv);
         });
 

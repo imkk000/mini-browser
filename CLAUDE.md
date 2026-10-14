@@ -35,6 +35,7 @@ Two formats are accepted. Legacy (top-level array of tabs):
     "label": "Tab name",
     "panes": [
       {
+        "name": "Work account",
         "url": "https://example.com",
         "partition": "persist:name",
         "proxy": "socks5://user:pass@127.0.0.1:1080"
@@ -55,7 +56,7 @@ New (object with optional app-wide settings):
 }
 ```
 
-Multiple entries in `panes` create a split-pane layout. `partition` is optional; use `persist:` prefix to keep cookies/storage across restarts. `proxy` is optional and accepts any Chromium-supported URL (`socks5://`, `socks4://`, `http://`, `https://`); credentials embedded in the URL are answered via `app.on('login')`. Proxy is per-**session**, so a pane with `proxy` must also have `partition` (panes sharing a partition share one proxy — first config wins, conflicts are logged).
+Multiple entries in `panes` create a split-pane layout. `name` is optional on a pane; when set, it renders as a header bar above that pane and replaces `Pane N` in the Inspect menu. `partition` is optional; use `persist:` prefix to keep cookies/storage across restarts. `proxy` is optional and accepts any Chromium-supported URL (`socks5://`, `socks4://`, `http://`, `https://`); credentials embedded in the URL are answered via `app.on('login')`. Proxy is per-**session**, so a pane with `proxy` must also have `partition` (panes sharing a partition share one proxy — first config wins, conflicts are logged).
 
 `refresh` is optional on a tab (not a pane) and starts auto refresh at launch for all panes in that tab. Must be one of the menu values: `"30s"`, `"1m"`, `"5m"`, `"15m"`, `"30m"`, `"1h"`, `"off"` (the equivalent number of seconds, e.g. `1800`, also works). Invalid values are ignored with a console warning. It can still be changed from the tab's right-click menu at runtime.
 
